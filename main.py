@@ -12,8 +12,8 @@ def sample(texture, x, y):
     # 1280 740
     # 720  360
     # 3
-    x = x * (w - 1) + 1 / 2
-    y = y * (h - 1) + 1 / 2
+    x = x * w - 1 / 2
+    y = y * h - 1 / 2
     # 2x2 grid of px
     xq = np.floor(x).astype(int)
     xr = x - xq
@@ -53,8 +53,9 @@ def sample_cascade(cascade, x, y, theta):
     # 1280 740
     # 720  360
     # 3
-    x = x * (w - 1) + 1 / 2
-    y = y * (h - 1) + 1 / 2
+    x = x * w - 1 / 2
+    y = y * h - 1 / 2
+    theta = theta * s - 1 / 2
     # 2x2 grid of px
     xq = np.floor(x).astype(int)
     xr = x - xq
@@ -115,50 +116,95 @@ def sample_cascade(cascade, x, y, theta):
 # 0-8, if we know 0-4, 4-8 sum of light is the answer
 
 
-def rad(texture, x, y, theta, near, far):
-    p = np.array([x, y])
-    r = np.array([np.cos(theta), np.sin(theta)])
-    result = np.array([0, 0, 0], dtype=float)
-    for i in range(int((far - near) * RESOLUTION)):
-        q = p + r * (near + i / RESOLUTION)
-        result += sample(texture, q[0], q[1])
-    return result
-
-
-def rad0(texture, x, y, theta):
-    p = np.array([x, y])
-    r = np.array([np.cos(theta), np.sin(theta)])
-    q = p + r * (1 / RESOLUTION)
-    return sample(texture, q[0], q[1])
-
-
 def L(texture):
     h, w, c = texture.shape
+    length = 1 / h
     out = np.zeros_like(texture)
     cascade0 = np.zeros((h, w, 4, c))
-    for i in range(texture.shape[0]):
-        for j in range(texture.shape[1]):
+    for i in range(cascade0.shape[0]):
+        for j in range(cascade0.shape[1]):
             for k in range(4):
-                theta = k / 4 * 2 * np.pi
-                p = np.array([(i + 1 / 2) / h, (j + 1 / 2) / w])
-                r = np.array([np.cos(theta), np.sin(theta)])
-                q = p + r * (1 / RESOLUTION)
+                y = (i + 1 / 2) / cascade0.shape[0]
+                x = (j + 1 / 2) / cascade0.shape[1]
+                theta = (k + 1 / 2) / cascade0.shape[2]
+                p = np.array([x, y])
+                r = np.array([np.cos(theta * 2 * np.pi), np.sin(theta * 2 * np.pi)])
+                q = p + r * length
                 cascade0[i, j, k] = sample(texture, q[0], q[1])
     cascades = [cascade0]
-    near = 1
-    far = 2
+
     for _ in range(1, CASCADES_N):
-        for theta in np.linspace(0, 2 * np.pi, ANGULAR_RESOLUTION)[:-1]:
-            # result += rad(texture, x, y, theta, near / RESOLUTION, far / RESOLUTION)
-            pass
-        near = far
-        far = 2 * near
-    out = cascade0.mean(axis=2)
-    return out
+        prev_cascade = cascades[-1]
+        # number of rays grows only by 2, (even tho it can grow by number of 4 or more), but then the work is the
+        # same as cascades0, or even if we have a number higher than 4 it would take more thn cascade0
+        # the entire process takes up exactly twice as much memory as cascade0
+        cascade = np.zeros(
+            (
+                prev_cascade.shape[0] // 2,
+                prev_cascade.shape[1] // 2,
+                prev_cascade.shape[2] * 2,
+                c,
+            )
+        )
+        for i in range(cascade.shape[0]):
+            for j in range(cascade.shape[1]):
+                for k in range(cascade.shape[2]):
+                    y = (i + 1 / 2) / cascade.shape[0]
+                    x = (j + 1 / 2) / cascade.shape[1]
+                    theta = (k + 1 / 2) / cascade.shape[2]
+                    # we want to compute 4-8, but len is 4, in prev step we computed cascades of length 2
+                    # so from the perspective from point p we only know 2-4 which is useless
+                    # so instead we need to ask 4-6 and 6-8, but those cascades need to be cascades 2-4
+                    # from the perspetive of another pixel
+
+                    p = np.array([x, y])
+                    r = np.array([np.cos(theta * 2 * np.pi), np.sin(theta * 2 * np.pi)])
+
+                    # case 16-32
+                    # len = 8 (prev cascade)
+                    # prev cascade 8-16
+                    # we need to ask someone who is 8 units away about his 8-16 cascade
+                    # and that will be our cascade from 16-24
+                    # and we also need to ask someone who is 16 units away about his 8-16 cascade
+                    # which will be our 24-32 cascade
+                    # and we need to merge that
+                    # and thats our 16-32 cascade
+                    pa = p + r * length
+                    pb = p + r * 2 * length
+                    cascade[i, j, k] = sample_cascade(
+                        prev_cascade,
+                        pa[0],
+                        pa[1],
+                        theta,
+                    ) + sample_cascade(
+                        prev_cascade,
+                        pb[0],
+                        pb[1],
+                        theta,
+                    )
+
+        cascades.append(cascade)
+        length *= 2
+
+    while len(cascades) > 1:
+        far = cascades.pop()
+        close = cascades.pop()
+
+        for i in range(close.shape[0]):
+            for j in range(close.shape[1]):
+                for k in range(close.shape[2]):
+                    y = (i + 1 / 2) / close.shape[0]
+                    x = (j + 1 / 2) / close.shape[1]
+                    theta = (k + 1 / 2) / close.shape[2]
+                    close[i, j, k] = close[i, j, k] + sample_cascade(far, x, y, theta)
+
+        cascades.append(close)
+
+    return cascades[0].mean(axis=2)
 
 
 def main():
-    im = Image.open("light.png").resize((64, 64)).convert("RGB")
+    im = Image.open("light.png").resize((128, 128)).convert("RGB")
     im = np.array(im)
     im = im.astype(float) / 255.0
 
