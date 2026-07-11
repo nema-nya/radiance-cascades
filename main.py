@@ -1,161 +1,101 @@
 import numpy as np
 from PIL import Image
 
-SCALE = 2.2
+RESOLUTION = 2**5
+CASCADES_N = 5
+ANGULAR_RESOLUTION = 32
 
 
-def light_field_slow(im, out):
-    lights = set()
-    for i in range(im.shape[0]):
-        for j in range(im.shape[1]):
-            l = im[i, j]
-            if l[3] > 1e-2:
-                lights.add((i, j))
+def sample(texture, x, y):
+    # 0l 1r
+    h, w, _ = texture.shape
+    # 1280 740
+    # 720  360
+    # 3
+    x = x * (w - 1) + 1 / 2
+    y = y * (h - 1) + 1 / 2
+    # 2x2 grid of px
+    xq = np.floor(x).astype(int)
+    xr = x - xq
+    xp = xq + 1
 
-    for i in range(out.shape[0]):
-        for j in range(out.shape[1]):
-            u = np.array((i, j))
-            color = np.zeros(4)
-            for x, y in lights:
-                v = np.array((x, y))
-                l = im[x, y]
-                d = np.linalg.norm(v - u) * SCALE
-                if d < 1e-2 * SCALE:
-                    continue
-                color += l / d
-            out[i, j] = color
+    yq = np.floor(y).astype(int)
+    yr = y - yq
+    yp = yq + 1
 
-    out /= out.max()
-    return out
+    # wrapping without repeating
+    xq = max(0, xq)
+    yq = max(0, yq)
+    xp = max(0, xp)
+    yp = max(0, yp)
 
+    xp = min(w - 1, xp)
+    yp = min(h - 1, yp)
+    xq = min(w - 1, xq)
+    yq = min(h - 1, yq)
 
-def trilinear_interpolation(input_buffer, output_buffer):
-    neighbors = [(x, y, z) for x in range(2) for y in range(2) for z in range(2)]
-    for i in range(output_buffer.shape[0]):
-        for j in range(output_buffer.shape[1]):
-            for k in range(output_buffer.shape[2]):
-                i_ = i / output_buffer.shape[0] * input_buffer.shape[0]
-                j_ = j / output_buffer.shape[1] * input_buffer.shape[1]
-                k_ = k / output_buffer.shape[2] * input_buffer.shape[2]
-                fx = i_ - int(i_)
-                fy = j_ - int(j_)
-                fz = k_ - int(k_)
-                i_ = int(i_)
-                j_ = int(j_)
-                k_ = int(k_)
-                for x, y, z in neighbors:
-                    if i_ + x < 0 or i_ + x >= input_buffer.shape[0]:
-                        continue
-                    if j_ + y < 0 or j_ + y >= input_buffer.shape[1]:
-                        continue
-                    if k_ + z < 0 or k_ + z >= input_buffer.shape[2]:
-                        continue
-                    f = (
-                        1
-                        * (1 - fx if x == 0 else fx)
-                        * (1 - fy if y == 0 else fy)
-                        * (1 - fz if z == 0 else fz)
-                    )
-                    output_buffer[i, j, k] += input_buffer[i_, j_, k_] * f
+    # we would do mod instead here if we needed repeating
+
+    top_left = texture[yq, xq]
+    top_right = texture[yq, xp]
+    bot_left = texture[yp, xq]
+    bot_right = texture[yp, xp]
+
+    top = top_left * (1 - xr) + top_right * xr
+    bot = bot_left * (1 - xr) + bot_right * xr
+
+    return top * (1 - yr) + bot * yr
 
 
-def light_field_fast(im, out):
-    buffer = np.zeros((im.shape[0], im.shape[1], 4, 4))
-    buffer[:-1, :, 2] = im[1:, :]  # top
-    buffer[1:, :, 0] = im[:-1, :]  # bottom
-    buffer[:, :-1, 1] = im[:, 1:]  # right
-    buffer[:, 1:, 3] = im[:, :-1]  # left
-    cascades = [buffer]
-    n = 0
-    while min(cascades[-1].shape) // 2 > 0:
-        n += 1
-        next_cascade = np.zeros(
-            (
-                cascades[-1].shape[0] // 2,
-                cascades[-1].shape[1] // 2,
-                2 * cascades[-1].shape[2],
-                4,
-            )
-        )
-        for i in range(next_cascade.shape[0]):
-            for j in range(next_cascade.shape[1]):
-                for k in range(next_cascade.shape[2]):
-                    angle = k / next_cascade.shape[2] * 2 * np.pi
-                    center = np.array(
-                        [
-                            (i + 1 / 2) / next_cascade.shape[0] * im.shape[0],
-                            (j + 1 / 2) / next_cascade.shape[1] * im.shape[1],
-                        ]
-                    )
-                    ray = np.array([np.cos(angle), np.sin(angle)])
-                    near = 2 ** (n - 1)
-                    far = 2**n
-                    color = np.zeros(4)
-                    for s in range(near, far):
-                        target = center + s * ray
-                        sample_dist = np.linalg.norm(target - center)
-                        target[0] /= im.shape[0]
-                        target[1] /= im.shape[1]
-                        target[0] *= cascades[-1].shape[0]
-                        target[1] *= cascades[-1].shape[1]
-                        top = int(target[0])
-                        left = int(target[1])
-                        prev_rotated_angle = k // 2
-                        neighbors = [
-                            (x, y, z)
-                            for x in range(2)
-                            for y in range(2)
-                            for z in range(2)
-                        ]
-                        for x, y, z in neighbors:
-                            if top + x < 0 or top + x >= cascades[-1].shape[0]:
-                                continue
-                            if left + y < 0 or left + y >= cascades[-1].shape[1]:
-                                continue
+# how much light is there on x,y cord
+# L(x,y) -> light at that cord
+# instead of asking that, we have l(x,y,theta)
+# how much light reaches the cord xy at angle theta (multipole expansion)
+# we take this l(x,y,theta) function and give 2 more arguments
+# how much light comes to x,y at angle theta between near and far
+# 0-8, if we know 0-4, 4-8 sum of light is the answer
 
-                            color_fx = target[0] - top
-                            color_fy = target[1] - left
-                            color_fz = k - 2 * prev_rotated_angle
-                            color_f = (
-                                1
-                                * (1 - color_fx if x == 0 else color_fx)
-                                * (1 - color_fy if y == 0 else color_fy)
-                                * (1 - color_fz if z == 0 else color_fz)
-                            )
-                            color += (
-                                cascades[-1][
-                                    top + x,
-                                    left + y,
-                                    (prev_rotated_angle + z) % cascades[-1].shape[2],
-                                ]
-                                / sample_dist
-                                * color_f
-                            )
-                    next_cascade[i, j, k] = color
-        cascades.append(next_cascade)
 
-    for n in range(1, len(cascades)):
-        rn = len(cascades) - 1 - n
-        tmp_buffer = np.zeros_like(cascades[rn - 1])
-        trilinear_interpolation(cascades[rn], tmp_buffer)
-        tmp_buffer += cascades[rn - 1]
-        cascades[rn - 1] = tmp_buffer
+def rad(texture, x, y, theta, near, far):
+    p = np.array([x, y])
+    r = np.array([np.cos(theta), np.sin(theta)])
+    result = np.array([0, 0, 0], dtype=float)
+    for i in range(int((far - near) * RESOLUTION)):
+        q = p + r * (near + i / RESOLUTION)
+        result += sample(texture, q[0], q[1])
+    return result
 
-    buffer = cascades[0]
-    out = buffer.sum(2)
-    return out
+
+def L(texture, x, y):
+    result = np.array([0, 0, 0], dtype=float)
+    for theta in np.linspace(0, 2 * np.pi, ANGULAR_RESOLUTION)[:-1]:
+        near = 0
+        far = 1
+        for _ in range(CASCADES_N):
+            result += rad(texture, x, y, theta, near / RESOLUTION, far / RESOLUTION)
+            near = far
+            far = 2 * near
+    return result
 
 
 def main():
-    im = Image.open("light.png").resize((100, 100))
+    im = Image.open("light.png").resize((64, 64)).convert("RGB")
     im = np.array(im)
     im = im.astype(float) / 255.0
     out = np.zeros_like(im)
 
-    out = light_field_fast(im, out)
+    for i in range(im.shape[0]):
+        for j in range(im.shape[1]):
+            out[i, j] = L(im, (j + 1 / 2) / im.shape[1], (i + 1 / 2) / im.shape[0])
+
+    print(out.max())
+
+    out /= out.max()
     out = np.clip((out * 255.0).astype(int), 0, 255).astype(np.uint8)
-    out = Image.fromarray(out, "RGBA")
+    out = Image.fromarray(out, "RGB")
     out.save("light_field.png")
+    # v = np.arange(10)
+    # print(interpolate(v, 0, 20))
 
 
 if __name__ == "__main__":
