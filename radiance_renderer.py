@@ -55,14 +55,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 
 class RadianceRenderer:
-    def __init__(self, image, texture):
+    def __init__(self, image, target):
         self.image = image
-        self.texture = texture
+        self.target = target
         self.light_texture = Texture(
             image=image,
             size=(image.height, image.width),
             format=wgpu.TextureFormat.rgba8unorm_srgb,
             usage=wgpu.TextureUsage.TEXTURE_BINDING,
+        )
+        self.cascades_texture = Texture(
+            image=image,
+            size=(image.height, image.width * 2),
+            format=wgpu.TextureFormat.bgra8unorm_srgb,
+            usage=wgpu.TextureUsage.TEXTURE_BINDING
+            | wgpu.TextureUsage.RENDER_ATTACHMENT,
         )
 
     async def setup(self, setup_ctx: SetupContext):
@@ -70,7 +77,7 @@ class RadianceRenderer:
         shader = device.create_shader_module(code=quad_shader_source)
 
         await self.light_texture.setup(setup_ctx)
-
+        await self.cascades_texture.setup(setup_ctx)
         texture_bind_group_layout = setup_ctx.device.create_bind_group_layout(
             label="radiance_renderer texture_bind_group_layout",
             entries=[
@@ -95,7 +102,7 @@ class RadianceRenderer:
         )
 
         multisample = None
-        if self.texture.multisample:
+        if self.cascades_texture.multisample:
             multisample = wgpu.MultisampleState(count=4)
 
         render_pipeline = await device.create_render_pipeline_async(
@@ -119,7 +126,7 @@ class RadianceRenderer:
             ),
             primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
         )
-        self.texture_bind_group_layout = texture_bind_group_layout
+        self.cascades_texture_bind_group_layout = texture_bind_group_layout
         self.context = setup_ctx.wgpu_context
         self.device = device
         self.render_pipeline = render_pipeline
@@ -137,21 +144,21 @@ class RadianceRenderer:
 
         texture_bind_group = self.device.create_bind_group(
             label="radiance_renderer texture_bind_group",
-            layout=self.texture_bind_group_layout,
+            layout=self.cascades_texture_bind_group_layout,
             entries=[
                 wgpu.BindGroupEntry(binding=0, resource=sampler),
                 wgpu.BindGroupEntry(binding=1, resource=texture),
             ],
         )
         resolve_target = None
-        if self.texture.multisample:
-            resolve_target = self.texture.resolve_target.create_view()
+        if self.cascades_texture.multisample:
+            resolve_target = self.cascades_texture.resolve_target.create_view()
         render_pass: wgpu.GPURenderPassEncoder = (
             frame_ctx.command_encoder.begin_render_pass(
                 label="radiance_renderer render_pass",
                 color_attachments=[
                     wgpu.RenderPassColorAttachment(
-                        view=self.texture.texture.create_view(),
+                        view=self.cascades_texture.texture.create_view(),
                         resolve_target=resolve_target,
                         clear_value=(
                             0,
