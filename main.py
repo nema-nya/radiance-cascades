@@ -7,6 +7,7 @@ import glfw
 from composer_renderer import ComposerRenderer
 from canvas import Canvas
 from radiance_renderer import RadianceRenderer
+from read_renderer import ReadRenderer
 from sequential_renderer import SequentialRenderer
 from camera import Camera
 from base_renderer import BaseRenderer
@@ -65,6 +66,7 @@ async def main():
 
     base_renderer = BaseRenderer(w, h)
     radiance_renderer = RadianceRenderer(im, base_renderer.full_screen_texture)
+    read_renderer = ReadRenderer(base_renderer.full_screen_texture)
     composer_renderer = ComposerRenderer(base_renderer.full_screen_texture)
 
     canvas = Canvas(
@@ -72,6 +74,7 @@ async def main():
             [
                 base_renderer,
                 radiance_renderer,
+                read_renderer,
                 composer_renderer,
             ]
         ),
