@@ -1,9 +1,7 @@
 import numpy as np
 from PIL import Image
 
-RESOLUTION = 2**5
 CASCADES_N = 5
-ANGULAR_RESOLUTION = 32
 
 
 def sample(texture, x, y):
@@ -116,10 +114,9 @@ def sample_cascade(cascade, x, y, theta):
 # 0-8, if we know 0-4, 4-8 sum of light is the answer
 
 
-def L(texture):
+def L(texture, selector=None):
     h, w, c = texture.shape
     length = 1 / h
-    out = np.zeros_like(texture)
     cascade0 = np.zeros((h, w, 4, c))
     for i in range(cascade0.shape[0]):
         for j in range(cascade0.shape[1]):
@@ -132,8 +129,8 @@ def L(texture):
                 q = p + r * length
                 cascade0[i, j, k] = sample(texture, q[0], q[1])
     cascades = [cascade0]
-
-    for _ in range(1, CASCADES_N):
+    cascade_number = np.floor(np.log2(h)).astype(int)
+    for _ in range(1, cascade_number):
         prev_cascade = cascades[-1]
         # number of rays grows only by 2, (even tho it can grow by number of 4 or more), but then the work is the
         # same as cascades0, or even if we have a number higher than 4 it would take more thn cascade0
@@ -186,8 +183,13 @@ def L(texture):
         cascades.append(cascade)
         length *= 2
 
+    if selector is not None and 0 not in selector:
+        cascades[0] = np.zeros_like(cascades[0])
     while len(cascades) > 1:
+        ix = len(cascades) - 1
         far = cascades.pop()
+        if selector is not None and ix not in selector:
+            continue
         close = cascades.pop()
 
         for i in range(close.shape[0]):
@@ -204,7 +206,7 @@ def L(texture):
 
 
 def main():
-    im = Image.open("light.png").resize((128, 128)).convert("RGB")
+    im = Image.open("light.png").resize((256, 256)).convert("RGB")
     im = np.array(im)
     im = im.astype(float) / 255.0
 
