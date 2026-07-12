@@ -1,10 +1,12 @@
 import asyncio
 
+from PIL import Image
 import numpy as np
 import glfw
 
 from composer_renderer import ComposerRenderer
 from canvas import Canvas
+from radiance_renderer import RadianceRenderer
 from sequential_renderer import SequentialRenderer
 from camera import Camera
 from base_renderer import BaseRenderer
@@ -58,31 +60,24 @@ class Controller:
 
 
 async def main():
-    w, h = 480, 720
-    camera = Camera(
-        position=np.array([0.0, 0.0, -5]),
-        target=np.array([0.0, 0.0, 0.0]),
-        fov=90.0 / 360.0 * 2.0 * np.pi,
-        aspect=w / h,
-        near=1.0,
-        far=10.0,
-    )
+    w, h = 256, 256
+    im = Image.open("light.png").resize((h, w)).convert("RGBA")
 
     base_renderer = BaseRenderer(w, h)
+    radiance_renderer = RadianceRenderer(im, base_renderer.full_screen_texture)
     composer_renderer = ComposerRenderer(base_renderer.full_screen_texture)
-    controller = Controller(camera)
 
     canvas = Canvas(
         SequentialRenderer(
             [
                 base_renderer,
+                radiance_renderer,
                 composer_renderer,
             ]
         ),
         width=w,
         height=h,
-        title="Showroom",
-        controller=controller,
+        title="Radiance Cascades",
     )
     await canvas.run()
 
