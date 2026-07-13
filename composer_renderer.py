@@ -84,8 +84,6 @@ class ComposerRenderer:
             ]
         )
 
-        await self.texture.setup(setup_ctx)
-
         texture_bind_group_layout = setup_ctx.device.create_bind_group_layout(
             label="composer_renderer texture_bind_group_layout",
             entries=[

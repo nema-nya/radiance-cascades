@@ -1,3 +1,4 @@
+import PIL
 import numpy as np
 import wgpu
 
@@ -67,15 +68,17 @@ class ReadRenderer:
         )
         h = self.texture.size[0]
         w = self.texture.size[1]
-        number_of_bytes_per_row = w * 32
+        number_of_bytes_per_row = w * 4
         number_of_bytes_per_row_padded = ((number_of_bytes_per_row + 255) // 256) * 256
         self.staging_buffer = Buffer(
             data=None,
-            usage=wgpu.BufferUsage.COPY_DST,
-            shape=np.shape([h, number_of_bytes_per_row_padded]),
+            usage=wgpu.BufferUsage.MAP_READ,
+            shape=np.array([h, number_of_bytes_per_row_padded]),
             dtype=np.uint8,
             staging=False,
         )
+        self.saved = False
+        self.i = 0
 
     async def setup(self, setup_ctx: SetupContext):
         device = setup_ctx.device
@@ -210,3 +213,27 @@ class ReadRenderer:
         render_pass.set_bind_group(1, texture_bind_group)
         render_pass.draw(6, 1, 0, 0)
         render_pass.end()
+        await self.staging_buffer.bind(self.device, frame_ctx.command_encoder)
+        # self.staging_target.texture.
+        frame_ctx.command_encoder.copy_texture_to_buffer(
+            {"texture": self.staging_target.texture},
+            {
+                "buffer": self.staging_buffer.buffer,
+                "offset": 0,
+                "bytes_per_row": self.staging_buffer.shape[1],
+                "rows_per_image": self.staging_buffer.shape[0],
+            },
+            (self.texture.size[0], self.texture.size[1], 1),
+        )
+        await self.staging_buffer.buffer.map_async(wgpu.MapMode.READ)
+        image = self.staging_buffer.buffer.read_mapped()
+        self.staging_buffer.buffer.unmap()
+        image = np.frombuffer(image, dtype=np.uint8)
+        image = image.reshape(self.staging_buffer.shape)
+        image = image[:, : self.texture.size[1] * 4]
+        image = image.reshape(self.texture.size[0], self.texture.size[1], 4)
+        image = PIL.Image.fromarray(image, mode="RGBA")
+
+        self.i += 1
+        if self.i == 2:
+            image.save("out.png")
