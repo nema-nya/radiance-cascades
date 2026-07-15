@@ -62,12 +62,9 @@ fn imod(x: i32, y: i32) -> i32 {
     return r;
 }
 
-
-@fragment
-fn fs_main(in: VertexOutput) -> FragmentOutput {
-    var out: FragmentOutput;
-    let u = in.texCoord[0];
-    let v = in.texCoord[1];
+fn uv_to_xytheta(uv: vec2<f32>) -> vec3<f32> {
+    let u = uv.x;
+    let v = uv.y;
     let length = 1.0 / f32(resolution);
     let x = u;
     let v_ = i32(floor(v * f32(resolution) * f32(angular_resolution) - 0.5));
@@ -75,9 +72,20 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     let y_ = (v_ - theta_) / angular_resolution;
 
     let y = (f32(y_) + 0.5) / f32(resolution);
-    let theta = (f32(theta_) + 0.5) / f32(angular_resolution) ;
+    let theta = (f32(theta_) + 0.5) / f32(angular_resolution);
+    
+    return vec3<f32>(x, y, theta);
+}
 
-    let p = vec2<f32>(x, y);
+
+@fragment
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+
+    let xytheta = uv_to_xytheta(in.texCoord);
+    let length = 1.0 / f32(resolution);
+    let p = xytheta.xy;
+    let theta = xytheta.z;
     let ray = vec2<f32>(cos(theta * 2 * PI), sin(theta * 2 * PI));
     let q = p + ray * length;
     out.color = textureSample(quadTexture, quadSampler, q);
@@ -96,6 +104,10 @@ struct VertexOutput {
     @builtin(position) pos: vec4<f32>,
 };
 
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+};
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var positions = array<vec2<f32>, 6>(
@@ -124,11 +136,66 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @group(0) @binding(0) var quadSampler: sampler;
 @group(0) @binding(1) var quadTexture: texture_2d<f32>;
 
+fn imod(x: i32, y: i32) -> i32 {
+    let r = x % y;
+    if (r < 0) {
+        return r + y;
+    }
+    return r;
+}
+
+fn uv_to_xytheta(uv: vec2<f32>, res: i32, ares: i32) -> vec3<f32> {
+    let u = uv.x;
+    let v = uv.y;
+    let length = 1.0 / f32(res);
+    let x = u;
+    let v_ = i32(floor(v * f32(res) * f32(ares) - 0.5));
+    let theta_ = imod(v_, ares);
+    let y_ = (v_ - theta_) / ares;
+
+    let y = (f32(y_) + 0.5) / f32(res);
+    let theta = (f32(theta_) + 0.5) / f32(ares);
+    
+    return vec3<f32>(x, y, theta);
+}
+
+fn xytheta_to_uv(xytheta: vec3<f32>, res: i32, ares: i32) -> vec2<f32> {
+    let x = xytheta.x;
+    let y = xytheta.y;
+    let theta = xytheta.z;
+    
+    let u = x;
+    let theta_ = i32(floor(theta * f32(ares) - 0.5));
+    let y_ = i32(floor(y * f32(res) - 0.5));
+    let v_ = y_ * ares + theta_;
+    let v = (f32(v_) + 0.5) / f32(ares * res);
+
+    return vec2<f32>(u, v);
+}
+
+override resolution: i32;
+override angular_resolution: i32;
+override ray_length: f32;
+
+
+const PI: f32 = 3.14159265;
+
+
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    //let tex_color = textureSample(quadTexture, quadSampler, in.texCoord);
-    let tex_color = vec4<f32>(in.texCoord.xy, 0.0, 1.0);
-    return tex_color;
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+    let xytheta = uv_to_xytheta(in.texCoord, resolution, angular_resolution);
+    let p = xytheta.xy;
+    let theta = xytheta.z;
+    let ray = vec2<f32>(cos(theta * 2 * PI), sin(theta * 2 * PI));
+    let length = ray_length / f32(resolution);
+    let pa = p + ray * length;
+    let pb = p + ray * 2 * length;
+    let uva = xytheta_to_uv(vec3<f32>(pa, theta), resolution * 2, angular_resolution / 2);
+    let uvb = xytheta_to_uv(vec3<f32>(pb, theta), resolution * 2, angular_resolution / 2);
+
+    out.color = textureSample(quadTexture, quadSampler, uva) + textureSample(quadTexture, quadSampler, uvb);
+    return out;
 }
 """
 
@@ -144,6 +211,7 @@ struct VertexOutput {
     @builtin(position) pos: vec4<f32>,
 };
 
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var positions = array<vec2<f32>, 6>(
@@ -169,14 +237,68 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
-@group(0) @binding(0) var quadSampler: sampler;
-@group(0) @binding(1) var quadTexture: texture_2d<f32>;
+@group(0) @binding(0) var shortSampler: sampler;
+@group(0) @binding(1) var shortTexture: texture_2d<f32>;
+@group(0) @binding(2) var longSampler: sampler;
+@group(0) @binding(3) var longTexture: texture_2d<f32>;
+
+
+fn imod(x: i32, y: i32) -> i32 {
+    let r = x % y;
+    if (r < 0) {
+        return r + y;
+    }
+    return r;
+}
+
+fn uv_to_xytheta(uv: vec2<f32>, res: i32, ares: i32) -> vec3<f32> {
+    let u = uv.x;
+    let v = uv.y;
+    let length = 1.0 / f32(res);
+    let x = u;
+    let v_ = i32(floor(v * f32(res) * f32(ares) - 0.5));
+    let theta_ = imod(v_, ares);
+    let y_ = (v_ - theta_) / ares;
+
+    let y = (f32(y_) + 0.5) / f32(res);
+    let theta = (f32(theta_) + 0.5) / f32(ares);
+    
+    return vec3<f32>(x, y, theta);
+}
+
+fn xytheta_to_uv(xytheta: vec3<f32>, res: i32, ares: i32) -> vec2<f32> {
+    let x = xytheta.x;
+    let y = xytheta.y;
+    let theta = xytheta.z;
+    
+    let u = x;
+    let theta_ = i32(floor(theta * f32(ares) - 0.5));
+    let y_ = i32(floor(y * f32(res) - 0.5));
+    let v_ = y_ * ares + theta_;
+    let v = (f32(v_) + 0.5) / f32(ares * res);
+
+    return vec2<f32>(u, v);
+}
+
+override resolution: i32;
+override angular_resolution: i32;
+override ray_length: f32;
+
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+};
+
+const PI: f32 = 3.14159265;
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    //let tex_color = textureSample(quadTexture, quadSampler, in.texCoord);
-    let tex_color = vec4<f32>(in.texCoord.xy, 0.0, 1.0);
-    return tex_color;
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+    let short_uv = in.texCoord;
+    let short_xytheta = uv_to_xytheta(short_uv, resolution, angular_resolution);
+    let long_uv = xytheta_to_uv(short_xytheta, resolution / 2, angular_resolution * 2); 
+
+    out.color = textureSample(shortTexture, shortSampler, short_uv) + textureSample(longTexture, longSampler, long_uv);
+    return out;
 }
 """
 
@@ -235,6 +357,20 @@ fn imod(x: i32, y: i32) -> i32 {
     return r;
 }
 
+fn xytheta_to_uv(xytheta: vec3<f32>) -> vec2<f32> {
+    let x = xytheta.x;
+    let y = xytheta.y;
+    let theta = xytheta.z;
+    
+    let u = x;
+    let theta_ = i32(floor(theta * f32(angular_resolution) - 0.5));
+    let y_ = i32(floor(y * f32(resolution) - 0.5));
+    let v_ = y_ * angular_resolution + theta_;
+    let v = (f32(v_) + 0.5) / f32(angular_resolution * resolution);
+
+    return vec2<f32>(u, v);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
@@ -244,12 +380,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var color = vec4<f32>(0,0,0,0);
     for (var i = 0; i < 4; i++) {
         let theta = (f32(i) + 0.5) / 4.0;
-        let u = x;
-        let theta_ = i;
-        let y_ = i32(floor(y * f32(resolution) - 0.5));
-        let v_ = y_ * angular_resolution + theta_;
-        let v = (f32(v_) + 0.5) / f32(angular_resolution * resolution);
-        color += textureSample(quadTexture, quadSampler, vec2<f32>(u, v));
+        color += textureSample(quadTexture, quadSampler, xytheta_to_uv(vec3<f32>(x, y, theta)));
     }
     out.color = color / 4.0;
     return out;
@@ -268,9 +399,20 @@ class RadianceRenderer:
             usage=wgpu.TextureUsage.TEXTURE_BINDING,
         )
         self.cascades_textures = []
-        cascade_number = np.floor(np.log2(image.height)).astype(int)
-        for i in range(cascade_number):
+        self.merged_cascade_textures = []
+        # self.cascade_number = np.floor(np.log2(image.height)).astype(int)
+        self.cascade_number = 3
+        for i in range(self.cascade_number):
             self.cascades_textures.append(
+                Texture(
+                    image=image,
+                    size=(image.height // (2**i) * 4 * (2**i), image.width // (2**i)),
+                    format=wgpu.TextureFormat.rgba8unorm_srgb,
+                    usage=wgpu.TextureUsage.TEXTURE_BINDING
+                    | wgpu.TextureUsage.RENDER_ATTACHMENT,
+                )
+            )
+            self.merged_cascade_textures.append(
                 Texture(
                     image=image,
                     size=(image.height // (2**i) * 4 * (2**i), image.width // (2**i)),
@@ -282,14 +424,25 @@ class RadianceRenderer:
 
     async def setup(self, setup_ctx: SetupContext):
         device = setup_ctx.device
-        rad0_shader = device.create_shader_module(code=rad0_shader_source)
-        rad_shader = device.create_shader_module(code=rad_shader_source)
-        merge_shader = device.create_shader_module(code=merge_shader_source)
-        collate_shader = device.create_shader_module(code=collate_shader_source)
+        rad0_shader = device.create_shader_module(
+            code=rad0_shader_source, label="rad0 shader source"
+        )
+        rad_shader = device.create_shader_module(
+            code=rad_shader_source, label="rad shader source"
+        )
+        merge_shader = device.create_shader_module(
+            code=merge_shader_source, label="merge shader"
+        )
+        collate_shader = device.create_shader_module(
+            code=collate_shader_source, label="collate shader"
+        )
 
         await self.light_texture.setup(setup_ctx)
         for cascade in self.cascades_textures:
             await cascade.setup(setup_ctx)
+
+        for merge_cascade in self.merged_cascade_textures:
+            await merge_cascade.setup(setup_ctx)
 
         texture_bind_group_layout = setup_ctx.device.create_bind_group_layout(
             label="radiance_renderer texture_bind_group_layout",
@@ -307,10 +460,44 @@ class RadianceRenderer:
             ],
         )
 
+        self.merge_texture_bind_group_layout = (
+            setup_ctx.device.create_bind_group_layout(
+                label="radiance_renderer merge_texture_bind_group_layout",
+                entries=[
+                    wgpu.BindGroupLayoutEntry(
+                        binding=0,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        sampler=wgpu.SamplerBindingLayout(),
+                    ),
+                    wgpu.BindGroupLayoutEntry(
+                        binding=1,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        texture=wgpu.TextureBindingLayout(),
+                    ),
+                    wgpu.BindGroupLayoutEntry(
+                        binding=2,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        sampler=wgpu.SamplerBindingLayout(),
+                    ),
+                    wgpu.BindGroupLayoutEntry(
+                        binding=3,
+                        visibility=wgpu.ShaderStage.FRAGMENT,
+                        texture=wgpu.TextureBindingLayout(),
+                    ),
+                ],
+            )
+        )
+
         pipeline_layout = device.create_pipeline_layout(
             label="radiance_renderer pipeline_layout",
             bind_group_layouts=[
                 texture_bind_group_layout,
+            ],
+        )
+        merge_pipeline_layout = device.create_pipeline_layout(
+            label="radiance_renderer merge_pipeline_layout",
+            bind_group_layouts=[
+                self.merge_texture_bind_group_layout,
             ],
         )
 
@@ -340,50 +527,68 @@ class RadianceRenderer:
             ),
             primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
         )
-        print(self.cascades_textures[0].size)
-        rad_pipeline = await device.create_render_pipeline_async(
-            label="radiance_renderer rad_pipeline",
-            layout=pipeline_layout,
-            vertex=wgpu.VertexState(
-                module=rad_shader,
-                entry_point="vs_main",
-            ),
-            depth_stencil=None,
-            multisample=None,
-            fragment=wgpu.FragmentState(
-                module=rad_shader,
-                entry_point="fs_main",
-                targets=[
-                    wgpu.ColorTargetState(
-                        format=wgpu.TextureFormat.rgba8unorm_srgb,
-                        blend={"color": {}, "alpha": {}},
-                    )
-                ],
-            ),
-            primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
-        )
-
-        merge_pipeline = await device.create_render_pipeline_async(
-            label="radiance_renderer merge_pipeline",
-            layout=pipeline_layout,
-            vertex=wgpu.VertexState(
-                module=merge_shader,
-                entry_point="vs_main",
-            ),
-            depth_stencil=None,
-            multisample=None,
-            fragment=wgpu.FragmentState(
-                module=merge_shader,
-                entry_point="fs_main",
-                targets=[
-                    wgpu.ColorTargetState(
-                        format=wgpu.TextureFormat.rgba8unorm_srgb,
-                        blend={"color": {}, "alpha": {}},
-                    )
-                ],
-            ),
-            primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
-        )
+        rad_pipelines = []
+        for i in range(1, self.cascade_number):
+            rad_pipelines.append(
+                await device.create_render_pipeline_async(
+                    label=f"radiance_renderer rad{i}_pipeline",
+                    layout=pipeline_layout,
+                    vertex=wgpu.VertexState(
+                        module=rad_shader,
+                        entry_point="vs_main",
+                    ),
+                    depth_stencil=None,
+                    multisample=None,
+                    fragment=wgpu.FragmentState(
+                        module=rad_shader,
+                        entry_point="fs_main",
+                        targets=[
+                            wgpu.ColorTargetState(
+                                format=wgpu.TextureFormat.rgba8unorm_srgb,
+                                blend={"color": {}, "alpha": {}},
+                            )
+                        ],
+                        constants={
+                            "resolution": self.cascades_textures[i].size[1],
+                            "angular_resolution": self.cascades_textures[i].size[0]
+                            // self.cascades_textures[i].size[1],
+                            "ray_length": 2 ** (i - 1),
+                        },
+                    ),
+                    primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
+                )
+            )
+        merge_pipelines = []
+        for i in range(1, self.cascade_number):
+            merge_pipelines.append(
+                await device.create_render_pipeline_async(
+                    label=f"radiance_renderer merge{i}_pipeline",
+                    layout=merge_pipeline_layout,
+                    vertex=wgpu.VertexState(
+                        module=merge_shader,
+                        entry_point="vs_main",
+                    ),
+                    depth_stencil=None,
+                    multisample=None,
+                    fragment=wgpu.FragmentState(
+                        module=merge_shader,
+                        entry_point="fs_main",
+                        targets=[
+                            wgpu.ColorTargetState(
+                                format=wgpu.TextureFormat.rgba8unorm_srgb,
+                                blend={"color": {}, "alpha": {}},
+                            )
+                        ],
+                        constants={
+                            "resolution": self.cascades_textures[i - 1].size[1],
+                            "angular_resolution": self.cascades_textures[i - 1].size[0]
+                            // self.cascades_textures[i - 1].size[1],
+                            "ray_length": 2 ** (i - 1),
+                        },
+                    ),
+                    primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
+                )
+            )
         multisample = None
         if self.target.multisample:
             multisample = wgpu.MultisampleState(count=4)
@@ -417,8 +622,8 @@ class RadianceRenderer:
         self.context = setup_ctx.wgpu_context
         self.device = device
         self.rad0_pipeline = rad0_pipeline
-        self.rad_pipeline = rad_pipeline
-        self.merge_pipeline = merge_pipeline
+        self.rad_pipelines = rad_pipelines
+        self.merge_pipelines = merge_pipelines
         self.collate_pipeline = collate_pipeline
 
     async def draw(self, frame_ctx: FrameContext):
@@ -465,83 +670,91 @@ class RadianceRenderer:
         rad0_pass.draw(6, 1, 0, 0)
         rad0_pass.end()
 
-        # for n, cascade in enumerate(self.cascades_textures[1:]):
+        for n, cascade in enumerate(self.cascades_textures[1:]):
 
-        #     cascade_pass: wgpu.GPURenderPassEncoder = (
-        #         frame_ctx.command_encoder.begin_render_pass(
-        #             label=f"radiance_renderer_{n} render_pass",
-        #             color_attachments=[
-        #                 wgpu.RenderPassColorAttachment(
-        #                     view=cascade.texture.create_view(),
-        #                     resolve_target=None,
-        #                     clear_value=(
-        #                         0,
-        #                         0,
-        #                         0,
-        #                         1,
-        #                     ),
-        #                     load_op="clear",
-        #                     store_op="store",
-        #                 )
-        #             ],
-        #         )
-        #     )
+            cascade_pass: wgpu.GPURenderPassEncoder = (
+                frame_ctx.command_encoder.begin_render_pass(
+                    label=f"radiance_renderer_{n+1} render_pass",
+                    color_attachments=[
+                        wgpu.RenderPassColorAttachment(
+                            view=cascade.texture.create_view(),
+                            resolve_target=None,
+                            clear_value=(
+                                0,
+                                0,
+                                0,
+                                1,
+                            ),
+                            load_op="clear",
+                            store_op="store",
+                        )
+                    ],
+                )
+            )
 
-        #     radn_texture_bind_group = self.device.create_bind_group(
-        #         label="radiance_renderer texture_bind_group",
-        #         layout=self.cascades_texture_bind_group_layout,
-        #         entries=[
-        #             wgpu.BindGroupEntry(binding=0, resource=sampler),
-        #             wgpu.BindGroupEntry(
-        #                 binding=1,
-        #                 resource=self.cascades_textures[n - 1].texture.create_view(),
-        #             ),
-        #         ],
-        #     )
+            radn_texture_bind_group = self.device.create_bind_group(
+                label="radiance_renderer texture_bind_group",
+                layout=self.cascades_texture_bind_group_layout,
+                entries=[
+                    wgpu.BindGroupEntry(binding=0, resource=sampler),
+                    wgpu.BindGroupEntry(
+                        binding=1,
+                        resource=self.cascades_textures[n].texture.create_view(),
+                    ),
+                ],
+            )
 
-        #     cascade_pass.set_pipeline(self.rad_pipeline)
-        #     cascade_pass.set_bind_group(0, radn_texture_bind_group)
-        #     cascade_pass.draw(6, 1, 0, 0)
-        #     cascade_pass.end()
+            cascade_pass.set_pipeline(self.rad_pipelines[n])
+            cascade_pass.set_bind_group(0, radn_texture_bind_group)
+            cascade_pass.draw(6, 1, 0, 0)
+            cascade_pass.end()
 
-        # for n in range(len(self.cascades_textures) - 1):
-        #     rn = len(self.cascades_textures) - 1 - n
-        #     merge_pass: wgpu.GPURenderPassEncoder = (
-        #         frame_ctx.command_encoder.begin_render_pass(
-        #             label=f"radiance_renderer_{n} merge_pass",
-        #             color_attachments=[
-        #                 wgpu.RenderPassColorAttachment(
-        #                     view=self.cascades_textures[rn - 1].texture.create_view(),
-        #                     resolve_target=None,
-        #                     clear_value=(
-        #                         0,
-        #                         0,
-        #                         0,
-        #                         1,
-        #                     ),
-        #                     load_op="clear",
-        #                     store_op="store",
-        #                 )
-        #             ],
-        #         )
-        #     )
+        self.merged_cascade_textures[-1] = self.cascades_textures[-1]
+        for n in range(len(self.cascades_textures) - 1):
+            rn = len(self.cascades_textures) - 1 - n
+            merge_pass: wgpu.GPURenderPassEncoder = (
+                frame_ctx.command_encoder.begin_render_pass(
+                    label=f"radiance_renderer_{rn - 1} merge_pass",
+                    color_attachments=[
+                        wgpu.RenderPassColorAttachment(
+                            view=self.merged_cascade_textures[
+                                rn - 1
+                            ].texture.create_view(),
+                            resolve_target=None,
+                            clear_value=(
+                                0,
+                                0,
+                                0,
+                                1,
+                            ),
+                            load_op="clear",
+                            store_op="store",
+                        )
+                    ],
+                )
+            )
 
-        #     merge_texture_bind_group = self.device.create_bind_group(
-        #         label="radiance_renderer merge_texture_bind_group",
-        #         layout=self.cascades_texture_bind_group_layout,
-        #         entries=[
-        #             wgpu.BindGroupEntry(binding=0, resource=sampler),
-        #             wgpu.BindGroupEntry(
-        #                 binding=1,
-        #                 resource=self.cascades_textures[rn].texture.create_view(),
-        #             ),
-        #         ],
-        #     )
+            merge_texture_bind_group = self.device.create_bind_group(
+                label="radiance_renderer merge_texture_bind_group",
+                layout=self.merge_texture_bind_group_layout,
+                entries=[
+                    wgpu.BindGroupEntry(binding=0, resource=sampler),
+                    wgpu.BindGroupEntry(
+                        binding=1,
+                        resource=self.cascades_textures[rn - 1].texture.create_view(),
+                    ),
+                    wgpu.BindGroupEntry(binding=2, resource=sampler),
+                    wgpu.BindGroupEntry(
+                        binding=3,
+                        resource=self.merged_cascade_textures[rn].texture.create_view(),
+                    ),
+                ],
+            )
 
-        #     merge_pass.set_pipeline(self.merge_pipeline)
-        #     merge_pass.set_bind_group(0, merge_texture_bind_group)
-        #     merge_pass.draw(6, 1, 0, 0)
-        #     merge_pass.end()
+            merge_pass.set_pipeline(self.merge_pipelines[rn - 1])
+            merge_pass.set_bind_group(0, merge_texture_bind_group)
+            merge_pass.draw(6, 1, 0, 0)
+            merge_pass.end()
 
         collate_texture_bind_group = self.device.create_bind_group(
             label="radiance_renderer collate_texture_bind_group",
@@ -550,7 +763,7 @@ class RadianceRenderer:
                 wgpu.BindGroupEntry(binding=0, resource=sampler),
                 wgpu.BindGroupEntry(
                     binding=1,
-                    resource=self.cascades_textures[0].texture.create_view(),
+                    resource=self.merged_cascade_textures[0].texture.create_view(),
                 ),
             ],
         )
