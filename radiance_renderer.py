@@ -159,18 +159,39 @@ fn uv_to_xytheta(uv: vec2<f32>, res: i32, ares: i32) -> vec3<f32> {
     return vec3<f32>(x, y, theta);
 }
 
-fn xytheta_to_uv(xytheta: vec3<f32>, res: i32, ares: i32) -> vec2<f32> {
+fn sample_cascade(tex: texture_2d<f32>, smp: sampler, xytheta: vec3<f32>, res: i32, ares: i32) -> vec4<f32> {
     let x = xytheta.x;
     let y = xytheta.y;
     let theta = xytheta.z;
-    
-    let u = x;
-    let theta_ = i32(floor(theta * f32(ares) - 0.5));
-    let y_ = i32(floor(y * f32(res) - 0.5));
-    let v_ = y_ * ares + theta_;
-    let v = (f32(v_) + 0.5) / f32(ares * res);
 
-    return vec2<f32>(u, v);
+    let yf = y * f32(res) - 0.5;
+    var yq = i32(floor(yf));
+    let yr = yf - f32(yq);
+    var yp = yq + 1;
+    yq = clamp(yq, 0, res - 1);
+    yp = clamp(yp, 0, res - 1);
+
+    let af = theta * f32(ares) - 0.5;
+    var aq = i32(floor(af));
+    let ar = af - f32(aq);
+    var ap = aq + 1;
+    aq = imod(aq, ares);
+    ap = imod(ap, ares);
+
+    let rows = f32(ares * res);
+    let v_qq = (f32(yq * ares + aq) + 0.5) / rows;
+    let v_qp = (f32(yq * ares + ap) + 0.5) / rows;
+    let v_pq = (f32(yp * ares + aq) + 0.5) / rows;
+    let v_pp = (f32(yp * ares + ap) + 0.5) / rows;
+
+    let c_qq = textureSample(tex, smp, vec2<f32>(x, v_qq));
+    let c_qp = textureSample(tex, smp, vec2<f32>(x, v_qp));
+    let c_pq = textureSample(tex, smp, vec2<f32>(x, v_pq));
+    let c_pp = textureSample(tex, smp, vec2<f32>(x, v_pp));
+
+    let c_q = c_qq * (1.0 - ar) + c_qp * ar;
+    let c_p = c_pq * (1.0 - ar) + c_pp * ar;
+    return c_q * (1.0 - yr) + c_p * yr;
 }
 
 override resolution: i32;
@@ -188,13 +209,12 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     let p = xytheta.xy;
     let theta = xytheta.z;
     let ray = vec2<f32>(cos(theta * 2 * PI), sin(theta * 2 * PI));
-    let length = ray_length / f32(resolution);
+    let length = ray_length;
     let pa = p + ray * length;
     let pb = p + ray * 2 * length;
-    let uva = xytheta_to_uv(vec3<f32>(pa, theta), resolution * 2, angular_resolution / 2);
-    let uvb = xytheta_to_uv(vec3<f32>(pb, theta), resolution * 2, angular_resolution / 2);
 
-    out.color = textureSample(quadTexture, quadSampler, uva) + textureSample(quadTexture, quadSampler, uvb);
+    out.color = sample_cascade(quadTexture, quadSampler, vec3<f32>(pa, theta), resolution * 2, angular_resolution / 2)
+        + sample_cascade(quadTexture, quadSampler, vec3<f32>(pb, theta), resolution * 2, angular_resolution / 2);
     return out;
 }
 """
@@ -266,18 +286,39 @@ fn uv_to_xytheta(uv: vec2<f32>, res: i32, ares: i32) -> vec3<f32> {
     return vec3<f32>(x, y, theta);
 }
 
-fn xytheta_to_uv(xytheta: vec3<f32>, res: i32, ares: i32) -> vec2<f32> {
+fn sample_cascade(tex: texture_2d<f32>, smp: sampler, xytheta: vec3<f32>, res: i32, ares: i32) -> vec4<f32> {
     let x = xytheta.x;
     let y = xytheta.y;
     let theta = xytheta.z;
-    
-    let u = x;
-    let theta_ = i32(floor(theta * f32(ares) - 0.5));
-    let y_ = i32(floor(y * f32(res) - 0.5));
-    let v_ = y_ * ares + theta_;
-    let v = (f32(v_) + 0.5) / f32(ares * res);
 
-    return vec2<f32>(u, v);
+    let yf = y * f32(res) - 0.5;
+    var yq = i32(floor(yf));
+    let yr = yf - f32(yq);
+    var yp = yq + 1;
+    yq = clamp(yq, 0, res - 1);
+    yp = clamp(yp, 0, res - 1);
+
+    let af = theta * f32(ares) - 0.5;
+    var aq = i32(floor(af));
+    let ar = af - f32(aq);
+    var ap = aq + 1;
+    aq = imod(aq, ares);
+    ap = imod(ap, ares);
+
+    let rows = f32(ares * res);
+    let v_qq = (f32(yq * ares + aq) + 0.5) / rows;
+    let v_qp = (f32(yq * ares + ap) + 0.5) / rows;
+    let v_pq = (f32(yp * ares + aq) + 0.5) / rows;
+    let v_pp = (f32(yp * ares + ap) + 0.5) / rows;
+
+    let c_qq = textureSample(tex, smp, vec2<f32>(x, v_qq));
+    let c_qp = textureSample(tex, smp, vec2<f32>(x, v_qp));
+    let c_pq = textureSample(tex, smp, vec2<f32>(x, v_pq));
+    let c_pp = textureSample(tex, smp, vec2<f32>(x, v_pp));
+
+    let c_q = c_qq * (1.0 - ar) + c_qp * ar;
+    let c_p = c_pq * (1.0 - ar) + c_pp * ar;
+    return c_q * (1.0 - yr) + c_p * yr;
 }
 
 override resolution: i32;
@@ -295,9 +336,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
     let short_uv = in.texCoord;
     let short_xytheta = uv_to_xytheta(short_uv, resolution, angular_resolution);
-    let long_uv = xytheta_to_uv(short_xytheta, resolution / 2, angular_resolution * 2); 
 
-    out.color = textureSample(shortTexture, shortSampler, short_uv) + textureSample(longTexture, longSampler, long_uv);
+    out.color = textureSample(shortTexture, shortSampler, short_uv)
+        + sample_cascade(longTexture, longSampler, short_xytheta, resolution / 2, angular_resolution * 2);
     return out;
 }
 """
@@ -400,8 +441,7 @@ class RadianceRenderer:
         )
         self.cascades_textures = []
         self.merged_cascade_textures = []
-        # self.cascade_number = np.floor(np.log2(image.height)).astype(int)
-        self.cascade_number = 3
+        self.cascade_number = np.floor(np.log2(image.height)).astype(int)
         for i in range(self.cascade_number):
             self.cascades_textures.append(
                 Texture(
@@ -552,7 +592,8 @@ class RadianceRenderer:
                             "resolution": self.cascades_textures[i].size[1],
                             "angular_resolution": self.cascades_textures[i].size[0]
                             // self.cascades_textures[i].size[1],
-                            "ray_length": 2 ** (i - 1),
+                            "ray_length": 2 ** (i - 1)
+                            / self.cascades_textures[0].size[1],
                         },
                     ),
                     primitive=wgpu.PrimitiveState(cull_mode=wgpu.CullMode.back),
