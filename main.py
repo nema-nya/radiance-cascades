@@ -61,8 +61,8 @@ class Controller:
 
 
 async def main():
-    w, h = 256, 256
-    im = Image.open("light.png").resize((h, w)).convert("RGBA")
+    w, h = 2048, 2048
+    im = Image.open("colors.png").resize((h, w)).convert("RGBA")
 
     base_renderer = BaseRenderer(w, h)
     radiance_renderer = RadianceRenderer(im, base_renderer.full_screen_texture)

@@ -212,9 +212,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     let length = ray_length;
     let pa = p + ray * length;
     let pb = p + ray * 2 * length;
-
-    out.color = sample_cascade(quadTexture, quadSampler, vec3<f32>(pa, theta), resolution * 2, angular_resolution / 2)
-        + sample_cascade(quadTexture, quadSampler, vec3<f32>(pb, theta), resolution * 2, angular_resolution / 2);
+    let pa_cascade = sample_cascade(quadTexture, quadSampler, vec3<f32>(pa, theta), resolution * 2, angular_resolution / 2);
+    let pb_cascade = sample_cascade(quadTexture, quadSampler, vec3<f32>(pb, theta), resolution * 2, angular_resolution / 2);
+    out.color = vec4<f32>(pa_cascade.xyz + pb_cascade.xyz * pa_cascade.w, pa_cascade.w * pb_cascade.w);
     return out;
 }
 """
@@ -336,15 +336,23 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
     let short_uv = in.texCoord;
     let short_xytheta = uv_to_xytheta(short_uv, resolution, angular_resolution);
-
-    out.color = textureSample(shortTexture, shortSampler, short_uv)
-        + sample_cascade(longTexture, longSampler, short_xytheta, resolution / 2, angular_resolution * 2);
+    let short_cascade = textureSample(shortTexture, shortSampler, short_uv);
+    let long_cascade = sample_cascade(longTexture, longSampler, short_xytheta, resolution / 2, angular_resolution * 2);
+    out.color = vec4<f32>(short_cascade.xyz + long_cascade.xyz * short_cascade.w, short_cascade.w * long_cascade.w);
     return out;
 }
 """
 
 
 collate_shader_source = """
+
+fn hash21(pIn: vec2f) -> f32 {
+  var p = fract(pIn * vec2f(127.1, 311.7));
+  p += dot(p, p + 19.19);
+  return fract(p.x * p.y);
+}
+
+
 
 struct VertexInput {
     @builtin(vertex_index) vertex_index : u32,
@@ -423,7 +431,10 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
         let theta = (f32(i) + 0.5) / 4.0;
         color += textureSample(quadTexture, quadSampler, xytheta_to_uv(vec3<f32>(x, y, theta)));
     }
-    out.color = color / 4.0;
+    let dither = (hash21(vec2<f32>(x,y))*2.0 - 1.0) / 255.0;
+
+    out.color = color / 4.0 + vec4<f32>(dither,dither,dither,0.0);
+    
     return out;
 }
 """
